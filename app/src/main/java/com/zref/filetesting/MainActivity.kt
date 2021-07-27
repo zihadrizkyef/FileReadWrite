@@ -9,11 +9,15 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.webkit.MimeTypeMap
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import java.io.*
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 
 
@@ -22,6 +26,8 @@ class MainActivity : AppCompatActivity() {
     private val DIRECTORY = Environment.DIRECTORY_DOCUMENTS + "/ZihadTestFile/"
     private val TYPE = "text/plain"
     private val FILE_NAME = "file-nganu"
+    private val CONTENT = "Halo Zihad"
+    private val CONTENT_OVERWRITE = "Halo Zihad, di overwrite"
 
     private lateinit var textView: TextView
     private val textBuilder = StringBuilder()
@@ -32,7 +38,7 @@ class MainActivity : AppCompatActivity() {
         textView = findViewById(R.id.textView)
 
         proceedPrivateFile()
-        proceedExternalFile()
+        proceedPublicFile()
     }
 
     override fun onRequestPermissionsResult(
@@ -43,32 +49,42 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_PERMISSION) {
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                log("permission to write external granted")
-                val existingFile = findExternal(DIRECTORY, FILE_NAME, TYPE)
-                if (existingFile != null) {
-                    overWriteExternal(existingFile)
+                log("Permission to write public file is granted")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val existingFile = findPublic(DIRECTORY, FILE_NAME, TYPE)
+                    if (existingFile != null) {
+                        overWritePublic(existingFile, CONTENT_OVERWRITE)
+                    } else {
+                        writeNewPublic(DIRECTORY, FILE_NAME, TYPE, CONTENT)
+                    }
+                    readPublic(DIRECTORY, FILE_NAME, TYPE)
                 } else {
-                    writeNewExternal(DIRECTORY, FILE_NAME, TYPE)
+                    writePublicOld(DIRECTORY, FILE_NAME, TYPE, CONTENT)
+                    readPublicOld(DIRECTORY, FILE_NAME, TYPE)
                 }
-                readExternal(DIRECTORY, FILE_NAME, TYPE)
             } else {
-                log("function cannot run properly due to permission issue")
+                log("Cannot write public file due to permission issue")
             }
         }
     }
 
-    private fun proceedExternalFile() {
-        if (haveWriteExternalPermission()) {
-            log("permission to write external granted")
-            val existingFile = findExternal(DIRECTORY, FILE_NAME, TYPE)
-            if (existingFile != null) {
-                overWriteExternal(existingFile)
+    private fun proceedPublicFile() {
+        if (haveWritePublicPermission()) {
+            log("Permission to write external is granted")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val existingFile = findPublic(DIRECTORY, FILE_NAME, TYPE)
+                if (existingFile != null) {
+                    overWritePublic(existingFile, CONTENT_OVERWRITE)
+                } else {
+                    writeNewPublic(DIRECTORY, FILE_NAME, TYPE, CONTENT)
+                }
+                readPublic(DIRECTORY, FILE_NAME, TYPE)
             } else {
-                writeNewExternal(DIRECTORY, FILE_NAME, TYPE)
+                writePublicOld(DIRECTORY, FILE_NAME, TYPE, CONTENT)
+                readPublicOld(DIRECTORY, FILE_NAME, TYPE)
             }
-            readExternal(DIRECTORY, FILE_NAME, TYPE)
         } else {
-            log("asking permission")
+            log("Asking permission...")
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
@@ -77,10 +93,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeNewExternal(
+    /**
+     * [fileName] should not have extension in it. The extension will be automatically
+     * added regarding to [type]
+     */
+    private fun writeNewPublic(
         directory: String,
         fileName: String,
-        type: String
+        type: String,
+        content: String
     ) {
         //must include "/" in end
         val newDir = if (directory.last() == '/') directory else "$directory/"
@@ -96,35 +117,44 @@ class MainActivity : AppCompatActivity() {
             )
             if (uri != null) {
                 contentResolver.openOutputStream(uri).use {
-                    it?.write("Helo efribadih".toByteArray())
+                    it?.write(content.toByteArray())
                 }
-                log("File created successfully")
             } else {
-                log("Uri null")
+                log("Fail to write public file : Uri null")
             }
         } catch (e: IOException) {
-            log("Fail to create file : ${e.localizedMessage}")
+            log("Fail to write public file : ${e.localizedMessage}")
         }
     }
 
-    private fun overWriteExternal(existingUri: Uri) {
+    /**
+     * [existingUri] can be obtained with [findPublic] function
+     */
+    private fun overWritePublic(existingUri: Uri, content: String) {
         try {
             contentResolver.openOutputStream(existingUri, "rwt")?.use {
-                it.write("This is overwritten data".toByteArray())
-                log("File written successfully")
+                it.write(content.toByteArray())
+                log("Public file overwritten successfully $existingUri")
             }
         } catch (e: IOException) {
-            log("Fail to write file")
+            log("Fail to write public file : ${e.localizedMessage}")
         }
     }
 
-    private fun findExternal(
+    /**
+     * check whether there is existing file
+     * if file is exists, it will return the uri to be used with [overWritePublic]
+     *
+     * [fileName] should not have extension in it. The extension will be automatically
+     * added regarding to [type]
+     */
+    private fun findPublic(
         directory: String,
         fileName: String,
         type: String
     ): Uri? {
         //must include "/" in end
-        val newDir = directory//if (directory.last() == '/') directory else "$directory/"
+        val newDir = if (directory.last() == '/') directory else "$directory/"
 
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
         val newFName = if (fileName.endsWith(extension!!)) fileName else "$fileName.$extension"
@@ -151,14 +181,58 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun readExternal(
+    /**
+     * [fileName] should not have extension in it. The extension will be automatically
+     * added regarding to [type]
+     */
+    private fun writePublicOld(
+        directory: String,
+        fileName: String,
+        type: String,
+        content: String
+    ) {
+        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
+        val newFName = if (fileName.endsWith(extension!!)) fileName else "$fileName.$extension"
+
+        val folder = File(Environment.getExternalStorageDirectory(), directory)
+        folder.mkdirs()
+
+        val file = File(folder, newFName)
+
+        log("Writing public file $file")
+        FileOutputStream(file).use {
+            it.write(content.toByteArray())
+        }
+    }
+
+    /**
+     * [fileName] should not have extension in it. The extension will be automatically
+     * added regarding to [type]
+     */
+    private fun readPublicOld(directory: String, fileName: String, type: String) {
+        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
+        val newFName = if (fileName.endsWith(extension!!)) fileName else "$fileName.$extension"
+
+        val folder = File(Environment.getExternalStorageDirectory(), directory)
+        folder.mkdirs()
+
+        val file = File(folder, newFName)
+        FileInputStream(file).bufferedReader().useLines { lines ->
+            log("Reading public file : "+lines.joinToString())
+        }
+    }
+
+    /**
+     * [fileName] should not have extension in it. The extension will be automatically
+     * added regarding to [type]
+     */
+    private fun readPublic(
         directory: String,
         fileName: String,
         type: String
     ) {
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
         val newFName = if (fileName.endsWith(extension!!)) fileName else "$fileName.$extension"
-        log("find $newFName")
 
         val contentUri = MediaStore.Files.getContentUri("external")
         val selection = MediaStore.MediaColumns.RELATIVE_PATH + "=?"
@@ -167,12 +241,11 @@ class MainActivity : AppCompatActivity() {
         contentResolver.query(contentUri, null, selection, selectionArgs, null).use { cursor ->
             var uri: Uri? = null
             if (cursor!!.count == 0) {
-                log("No file found in $directory")
+                log("Try reading public file at $directory, but file not found")
             } else {
                 while (cursor.moveToNext()) {
                     val findName =
                         cursor.getString(cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME))
-                    log("found $newFName")
                     if (findName == newFName) {
                         val id = cursor.getLong(cursor.getColumnIndex(MediaStore.MediaColumns._ID))
                         uri = ContentUris.withAppendedId(contentUri, id)
@@ -180,7 +253,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 if (uri == null) {
-                    log("$fileName not found")
+                    log("Try reading public file at $fileName, but file not found")
                 } else {
                     try {
                         val inputStream = contentResolver.openInputStream(uri)
@@ -189,16 +262,16 @@ class MainActivity : AppCompatActivity() {
                         inputStream.read(bytes)
                         inputStream.close()
                         val jsonString = String(bytes, StandardCharsets.UTF_8)
-                        log(jsonString)
+                        log("Reading public file : $jsonString")
                     } catch (e: IOException) {
-                        log("Fail to read file")
+                        log("Fail to read public file ${e.localizedMessage}")
                     }
                 }
             }
         }
     }
 
-    private fun haveWriteExternalPermission(): Boolean {
+    private fun haveWritePublicPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
                     PackageManager.PERMISSION_GRANTED
@@ -208,11 +281,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun proceedPrivateFile() {
-        val directory = "Zihad/Anu/Sub"
-        val fileName = "test.text"
-        val fileContent = "asem belekeke mueeueueue"
+        val directory = "Zihad/TestFile/SubFolder"
+        val fileName = "TestHello.txt"
+        val fileContent = "Halo Zihad"
         writePrivate(directory, fileName, fileContent)
-        log(readPrivate(directory, fileName))
+        readPrivate(directory, fileName)
     }
 
     private fun writePrivate(directory: String, fileName: String, fileContent: String) {
@@ -220,19 +293,19 @@ class MainActivity : AppCompatActivity() {
         val fileDir = File(rootDir, directory)
         fileDir.mkdirs()
         val file = File(fileDir, fileName)
-        log(file.toString())
+        log("Writing private file : $file")
         FileOutputStream(file).use {
             it.write(fileContent.toByteArray())
         }
     }
 
-    private fun readPrivate(directory: String, fileName: String): String {
+    private fun readPrivate(directory: String, fileName: String) {
         val rootDir = getDir("", MODE_PRIVATE)
         val fileDir = File(rootDir, directory)
         FileInputStream(File(fileDir, fileName)).bufferedReader().useLines { lines ->
-            return lines.fold("") { some, text ->
+            log("Reading private file : " + lines.fold("") { some, text ->
                 "$some\n$text"
-            }.trim()
+            }.trim())
         }
     }
 
