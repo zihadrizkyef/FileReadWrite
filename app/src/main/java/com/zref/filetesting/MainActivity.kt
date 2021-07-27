@@ -4,14 +4,17 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
+import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import java.io.*
@@ -32,7 +35,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         textView = findViewById(R.id.textView)
 
-        //proceedPrivateFile()
+        proceedPrivateFile()
         proceedExternalFile()
     }
 
@@ -104,10 +107,10 @@ class MainActivity : AppCompatActivity() {
         type: String
     ) {
         //must include "/" in end
-        val newDir = if (directory.last() == '/') directory else "$directory/"
+        val newDir = directory//if (directory.last() == '/') directory else "$directory/"
 
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
-        val newFName = if (fileName.endsWith(extension!!)) fileName else fileName+extension
+        val newFName = if (fileName.endsWith(extension!!)) fileName else "$fileName.$extension"
 
         val contentUri = MediaStore.Files.getContentUri("external")
         val selection = MediaStore.MediaColumns.RELATIVE_PATH + "=?"
@@ -115,7 +118,7 @@ class MainActivity : AppCompatActivity() {
         contentResolver.query(contentUri, null, selection, selectionArgs, null).use {
             var uri: Uri? = null
             if (it!!.count == 0) {
-                log("count 0, existing file not found, write new file| $selection ${selectionArgs.joinToString()}")
+                log("$selection ${selectionArgs.joinToString()}")
                 writeExternal(directory, fileName, type)
             } else {
                 while (it.moveToNext()) {
@@ -142,29 +145,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    private fun deleteExistingExternal(
-        directory: String,
-        fileName: String,
-        type: String
-    ) {
-        //must include "/" in front and end
-        var newDir = directory
-        if (newDir.first() != '/') {
-            newDir = "/$newDir"
-        }
-        if (newDir.last() != '/') {
-            newDir += "/"
-        }
-
-        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type)
-        val newFName = if (fileName.endsWith(extension!!)) fileName else fileName+extension
-
-        val contentUri = MediaStore.Files.getContentUri("external")
-        val selection = MediaStore.MediaColumns.RELATIVE_PATH + "=? AND " + MediaStore.MediaColumns.DISPLAY_NAME + "=?"
-        val selectionArgs = arrayOf(newDir, newFName)
-        log("delete "+contentResolver.delete(contentUri, selection, selectionArgs)+" rows")
     }
 
     private fun readExternal(
