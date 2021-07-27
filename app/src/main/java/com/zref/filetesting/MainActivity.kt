@@ -4,17 +4,13 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.pm.PackageManager
-import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
-import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import java.io.*
@@ -48,7 +44,12 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_PERMISSION) {
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 log("permission to write external granted")
-                replace(DIRECTORY, FILE_NAME, TYPE)
+                val existingFile = findExternal(DIRECTORY, FILE_NAME, TYPE)
+                if (existingFile != null) {
+                    overWriteExternal(existingFile)
+                } else {
+                    writeNewExternal(DIRECTORY, FILE_NAME, TYPE)
+                }
                 readExternal(DIRECTORY, FILE_NAME, TYPE)
             } else {
                 log("function cannot run properly due to permission issue")
@@ -59,7 +60,12 @@ class MainActivity : AppCompatActivity() {
     private fun proceedExternalFile() {
         if (haveWriteExternalPermission()) {
             log("permission to write external granted")
-            replace(DIRECTORY, FILE_NAME, TYPE)
+            val existingFile = findExternal(DIRECTORY, FILE_NAME, TYPE)
+            if (existingFile != null) {
+                overWriteExternal(existingFile)
+            } else {
+                writeNewExternal(DIRECTORY, FILE_NAME, TYPE)
+            }
             readExternal(DIRECTORY, FILE_NAME, TYPE)
         } else {
             log("asking permission")
@@ -71,7 +77,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeExternal(
+    private fun writeNewExternal(
         directory: String,
         fileName: String,
         type: String
@@ -101,11 +107,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun replace(
+    private fun overWriteExternal(existingUri: Uri) {
+        try {
+            contentResolver.openOutputStream(existingUri, "rwt")?.use {
+                it.write("This is overwritten data".toByteArray())
+                log("File written successfully")
+            }
+        } catch (e: IOException) {
+            log("Fail to write file")
+        }
+    }
+
+    private fun findExternal(
         directory: String,
         fileName: String,
         type: String
-    ) {
+    ): Uri? {
         //must include "/" in end
         val newDir = directory//if (directory.last() == '/') directory else "$directory/"
 
@@ -117,9 +134,8 @@ class MainActivity : AppCompatActivity() {
         val selectionArgs = arrayOf(newDir)
         contentResolver.query(contentUri, null, selection, selectionArgs, null).use {
             var uri: Uri? = null
-            if (it!!.count == 0) {
-                log("$selection ${selectionArgs.joinToString()}")
-                writeExternal(directory, fileName, type)
+            return if (it!!.count == 0) {
+                null
             } else {
                 while (it.moveToNext()) {
                     val found =
@@ -130,19 +146,7 @@ class MainActivity : AppCompatActivity() {
                         break
                     }
                 }
-                if (uri == null) {
-                    log("existing file not found, write new file| $selection ${selectionArgs.joinToString()}")
-                    writeExternal(directory, fileName, type)
-                } else {
-                    try {
-                        val outputStream = contentResolver.openOutputStream(uri, "rwt")
-                        outputStream!!.write("This is overwritten data".toByteArray())
-                        outputStream.close()
-                        log("File written successfully")
-                    } catch (e: IOException) {
-                        log("Fail to write file")
-                    }
-                }
+                uri
             }
         }
     }
